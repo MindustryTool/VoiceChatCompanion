@@ -290,8 +290,10 @@ public class AudioCaptureService extends Service {
     private void connectToMindustry() {
         try {
             socket = new Socket(HOST, PORT);
+            socket.setTcpNoDelay(true); // Disable Nagle's algorithm for lower latency
+            socket.setSoTimeout(5000); // 5 second timeout
             outputStream = socket.getOutputStream();
-            Log.i(TAG, "Connected to Mindustry mod");
+            Log.i(TAG, "Connected to Mindustry mod (TCP_NODELAY enabled)");
         } catch (Exception e) {
             Log.w(TAG, "Cannot connect to Mindustry mod: " + e.getMessage());
         }
