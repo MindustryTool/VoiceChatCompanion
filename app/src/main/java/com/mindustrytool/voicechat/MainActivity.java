@@ -5,6 +5,8 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.view.Menu;
+import android.view.MenuItem;
 import android.widget.Button;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -25,6 +27,7 @@ public class MainActivity extends AppCompatActivity {
     private Button startButton;
     private Button stopButton;
     private TextView statusText;
+    private UpdateChecker updateChecker;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -39,12 +42,52 @@ public class MainActivity extends AppCompatActivity {
         stopButton.setOnClickListener(v -> stopService());
 
         updateUI(AudioCaptureService.isRunning());
+
+        // Check for updates on app start
+        updateChecker = new UpdateChecker(this);
+        updateChecker.checkForUpdates();
     }
 
     @Override
     protected void onResume() {
         super.onResume();
         updateUI(AudioCaptureService.isRunning());
+    }
+
+    @Override
+    public boolean onCreateOptionsMenu(Menu menu) {
+        menu.add(0, 1, 0, "Check for Updates");
+        menu.add(0, 2, 0, "About");
+        return true;
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(@NonNull MenuItem item) {
+        switch (item.getItemId()) {
+            case 1:
+                updateChecker.checkForUpdatesWithNotification();
+                return true;
+            case 2:
+                showAbout();
+                return true;
+            default:
+                return super.onOptionsItemSelected(item);
+        }
+    }
+
+    private void showAbout() {
+        try {
+            String version = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+            new androidx.appcompat.app.AlertDialog.Builder(this)
+                    .setTitle("Voice Chat Companion")
+                    .setMessage("Version: " + version + "\n\n" +
+                            "Captures microphone audio for Mindustry Voice Chat.\n\n" +
+                            "github.com/MindustryTool/VoiceChatCompanion")
+                    .setPositiveButton("OK", null)
+                    .show();
+        } catch (Exception e) {
+            // Ignore
+        }
     }
 
     private void checkPermissionsAndStart() {
