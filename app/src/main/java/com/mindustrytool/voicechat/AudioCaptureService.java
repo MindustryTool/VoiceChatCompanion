@@ -19,6 +19,7 @@ import android.util.Log;
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
 
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.Socket;
 
@@ -27,12 +28,22 @@ import java.net.Socket;
  * mod.
  * Includes audio processing for better quality: noise suppression, echo
  * cancellation, AGC.
+ * 
+ * Now supports remote control commands from Mod:
+ * - CMD_START_MIC (0x01): Start recording
+ * - CMD_STOP_MIC (0x02): Stop recording (privacy protection)
+ * - CMD_SHUTDOWN (0x03): Close the app
  */
 public class AudioCaptureService extends Service {
 
     private static final String TAG = "AudioCaptureService";
     private static final String CHANNEL_ID = "voice_chat_channel";
     private static final int NOTIFICATION_ID = 1;
+
+    // Control commands from Mod
+    public static final byte CMD_START_MIC = 0x01;
+    public static final byte CMD_STOP_MIC = 0x02;
+    public static final byte CMD_SHUTDOWN = 0x03;
 
     // Audio configuration - optimized for voice
     private static final int SAMPLE_RATE = 48000;
@@ -45,11 +56,14 @@ public class AudioCaptureService extends Service {
     private static final int PORT = 25566; // Mindustry mod listens on this port
 
     private static volatile boolean isRunning = false;
+    private volatile boolean isMicActive = false; // Only record when true
 
     private AudioRecord audioRecord;
     private Thread captureThread;
+    private Thread commandThread;
     private Socket socket;
     private OutputStream outputStream;
+    private InputStream inputStream;
 
     // Audio processors for better quality
     private NoiseSuppressor noiseSuppressor;
@@ -254,7 +268,8 @@ public class AudioCaptureService extends Service {
         while (isRunning && audioRecord != null) {
             int samplesRead = audioRecord.read(buffer, 0, BUFFER_SIZE);
 
-            if (samplesRead > 0) {
+            // Only send audio when mic is active (controlled by Mod)
+            if (samplesRead > 0 && isMicActive) {
                 // Convert shorts to bytes (little endian)
                 for (int i = 0; i < samplesRead; i++) {
                     byteBuffer[i * 2] = (byte) (buffer[i] & 0xFF);
@@ -263,6 +278,51 @@ public class AudioCaptureService extends Service {
 
                 // Send to Mindustry mod
                 sendAudio(byteBuffer, samplesRead * 2);
+            }
+        }
+    }
+
+    /**
+     * Listen for control commands from Mod (START_MIC, STOP_MIC, SHUTDOWN).
+     */
+    private void commandListenerLoop() {
+        while (isRunning) {
+            try {
+                if (inputStream == null) {
+                    Thread.sleep(100);
+                    continue;
+                }
+
+                int cmd = inputStream.read();
+                if (cmd < 0) {
+                    // Connection closed
+                    Log.w(TAG, "Command stream closed by Mod");
+                    closeSocket();
+                    Thread.sleep(1000); // Wait before retry
+                    continue;
+                }
+
+                switch (cmd) {
+                    case CMD_START_MIC:
+                        Log.i(TAG, "Received CMD_START_MIC - mic activated");
+                        isMicActive = true;
+                        break;
+                    case CMD_STOP_MIC:
+                        Log.i(TAG, "Received CMD_STOP_MIC - mic paused (privacy mode)");
+                        isMicActive = false;
+                        break;
+                    case CMD_SHUTDOWN:
+                        Log.i(TAG, "Received CMD_SHUTDOWN - stopping service");
+                        isMicActive = false;
+                        stopSelf();
+                        return;
+                    default:
+                        Log.w(TAG, "Unknown command: " + cmd);
+                }
+            } catch (java.net.SocketTimeoutException e) {
+                // Timeout is OK
+            } catch (Exception e) {
+                Log.w(TAG, "Command listener error: " + e.getMessage());
             }
         }
     }
@@ -293,14 +353,25 @@ public class AudioCaptureService extends Service {
             socket.setTcpNoDelay(true); // Disable Nagle's algorithm for lower latency
             socket.setSoTimeout(5000); // 5 second timeout
             outputStream = socket.getOutputStream();
-            Log.i(TAG, "Connected to Mindustry mod (TCP_NODELAY enabled)");
+            inputStream = socket.getInputStream();
+            Log.i(TAG, "Connected to Mindustry mod (TCP_NODELAY enabled, command channel ready)");
+
+            // Start command listener if not already running
+            if (commandThread == null || !commandThread.isAlive()) {
+                commandThread = new Thread(this::commandListenerLoop);
+                commandThread.setDaemon(true);
+                commandThread.start();
+            }
         } catch (Exception e) {
             Log.w(TAG, "Cannot connect to Mindustry mod: " + e.getMessage());
         }
     }
 
     private void closeSocket() {
+        isMicActive = false; // Safety: stop mic on disconnect
         try {
+            if (inputStream != null)
+                inputStream.close();
             if (outputStream != null)
                 outputStream.close();
             if (socket != null)
@@ -308,16 +379,23 @@ public class AudioCaptureService extends Service {
         } catch (Exception e) {
             // Ignore
         }
+        inputStream = null;
         outputStream = null;
         socket = null;
     }
 
     private void stopCapture() {
         isRunning = false;
+        isMicActive = false;
 
         if (captureThread != null) {
             captureThread.interrupt();
             captureThread = null;
+        }
+
+        if (commandThread != null) {
+            commandThread.interrupt();
+            commandThread = null;
         }
 
         // Release audio processing effects
