@@ -206,6 +206,87 @@ public class AudioCaptureService extends Service {
         }
     }
 
+    /**
+     * Enable Android's built-in audio processing for better voice quality.
+     */
+    private void enableAudioProcessing(int audioSessionId) {
+        // Noise Suppressor - reduces background noise
+        // Disabled by default as user reported it's too aggressive
+        // if (NoiseSuppressor.isAvailable()) {
+        // try {
+        // noiseSuppressor = NoiseSuppressor.create(audioSessionId);
+        // if (noiseSuppressor != null) {
+        // noiseSuppressor.setEnabled(true);
+        // Log.i(TAG, "NoiseSuppressor enabled");
+        // }
+        // } catch (Exception e) {
+        // Log.w(TAG, "Failed to enable NoiseSuppressor: " + e.getMessage());
+        // }
+        // }
+
+        // Acoustic Echo Canceler - reduces echo
+        if (AcousticEchoCanceler.isAvailable()) {
+            try {
+                echoCanceler = AcousticEchoCanceler.create(audioSessionId);
+                if (echoCanceler != null) {
+                    echoCanceler.setEnabled(true);
+                    Log.i(TAG, "AcousticEchoCanceler enabled");
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "Failed to enable AcousticEchoCanceler: " + e.getMessage());
+            }
+        } else {
+            Log.w(TAG, "AcousticEchoCanceler not available on this device");
+        }
+
+        // Automatic Gain Control - Keep this to help with levels
+        if (AutomaticGainControl.isAvailable()) {
+            try {
+                agc = AutomaticGainControl.create(audioSessionId);
+                if (agc != null) {
+                    agc.setEnabled(true);
+                    Log.i(TAG, "AutomaticGainControl enabled");
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "Failed to enable AutomaticGainControl: " + e.getMessage());
+            }
+        } else {
+            Log.w(TAG, "AutomaticGainControl not available on this device");
+        }
+    }
+
+    /**
+     * Release audio processing effects.
+     */
+    private void releaseAudioProcessing() {
+        if (noiseSuppressor != null) {
+            try {
+                noiseSuppressor.release();
+            } catch (Exception e) {
+                // Ignore
+            }
+            noiseSuppressor = null;
+        }
+
+        if (echoCanceler != null) {
+            try {
+                echoCanceler.release();
+            } catch (Exception e) {
+                // Ignore
+            }
+            echoCanceler = null;
+        }
+
+        if (agc != null) {
+            try {
+                agc.release();
+            } catch (Exception e) {
+                // Ignore
+            }
+            agc = null;
+        }
+    }
+
     // Helper to apply gain with Soft Limiter
     private byte[] applyGain(byte[] audioData, int length, float gain) {
         if (gain == 1.0f)
