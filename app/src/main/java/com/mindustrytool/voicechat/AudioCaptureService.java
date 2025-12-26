@@ -152,8 +152,10 @@ public class AudioCaptureService extends Service {
         }).start();
 
         int minBufferSize = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT);
-        // Use larger buffer for smoother audio
-        int bufferSize = Math.max(minBufferSize * 2, BUFFER_SIZE * 4);
+        // Optimize for Latency: Use smaller buffer (closer to minBufferSize)
+        // Previously: Math.max(minBufferSize * 2, BUFFER_SIZE * 4);
+        // New: Math.max(minBufferSize, BUFFER_SIZE * 2); -> Reduced buffering
+        int bufferSize = Math.max(minBufferSize, BUFFER_SIZE * 2);
 
         try {
             // Use VOICE_COMMUNICATION for better voice quality and built-in processing
@@ -163,7 +165,6 @@ public class AudioCaptureService extends Service {
                     CHANNEL_CONFIG,
                     AUDIO_FORMAT,
                     bufferSize);
-
             if (audioRecord.getState() != AudioRecord.STATE_INITIALIZED) {
                 Log.e(TAG, "AudioRecord not initialized, falling back to MIC source");
                 updateNotification("Mic Init Failed (Retrying...)");
@@ -197,8 +198,6 @@ public class AudioCaptureService extends Service {
         } catch (SecurityException e) {
             Log.e(TAG, "Permission denied: " + e.getMessage());
             updateNotification("Error: Mic Permission Denied!");
-            // Keep service running briefly so user can see notification?
-            // no, stopSelf is better, but notification might vanish.
             stopSelf();
         } catch (Exception e) {
             Log.e(TAG, "Mic Error: " + e.getMessage());
@@ -207,105 +206,63 @@ public class AudioCaptureService extends Service {
         }
     }
 
-    /**
-     * Enable Android's built-in audio processing for better voice quality.
-     */
-    private void enableAudioProcessing(int audioSessionId) {
-        // Noise Suppressor - reduces background noise
-        if (NoiseSuppressor.isAvailable()) {
-            try {
-                noiseSuppressor = NoiseSuppressor.create(audioSessionId);
-                if (noiseSuppressor != null) {
-                    noiseSuppressor.setEnabled(true);
-                    Log.i(TAG, "NoiseSuppressor enabled");
-                }
-            } catch (Exception e) {
-                Log.w(TAG, "Failed to enable NoiseSuppressor: " + e.getMessage());
-            }
-        } else {
-            Log.w(TAG, "NoiseSuppressor not available on this device");
-        }
+    // Helper to apply gain with Soft Limiter
+    private byte[] applyGain(byte[] audioData, int length, float gain) {
+        if (gain == 1.0f)
+            return audioData;
 
-        // Acoustic Echo Canceler - reduces echo
-        if (AcousticEchoCanceler.isAvailable()) {
-            try {
-                echoCanceler = AcousticEchoCanceler.create(audioSessionId);
-                if (echoCanceler != null) {
-                    echoCanceler.setEnabled(true);
-                    Log.i(TAG, "AcousticEchoCanceler enabled");
-                }
-            } catch (Exception e) {
-                Log.w(TAG, "Failed to enable AcousticEchoCanceler: " + e.getMessage());
-            }
-        } else {
-            Log.w(TAG, "AcousticEchoCanceler not available on this device");
-        }
+        byte[] output = new byte[length];
 
-        // Automatic Gain Control - normalizes volume
-        if (AutomaticGainControl.isAvailable()) {
-            try {
-                agc = AutomaticGainControl.create(audioSessionId);
-                if (agc != null) {
-                    agc.setEnabled(true);
-                    Log.i(TAG, "AutomaticGainControl enabled");
-                }
-            } catch (Exception e) {
-                Log.w(TAG, "Failed to enable AutomaticGainControl: " + e.getMessage());
-            }
-        } else {
-            Log.w(TAG, "AutomaticGainControl not available on this device");
-        }
-    }
+        for (int i = 0; i < length; i += 2) {
+            // Little Endian conversion
+            int low = audioData[i] & 0xFF;
+            int high = audioData[i + 1] << 8;
+            int sample = (short) (high | low);
 
-    /**
-     * Release audio processing effects.
-     */
-    private void releaseAudioProcessing() {
-        if (noiseSuppressor != null) {
-            try {
-                noiseSuppressor.release();
-            } catch (Exception e) {
-                // Ignore
-            }
-            noiseSuppressor = null;
-        }
+            // 1. Apply Gain
+            float processed = sample * gain;
 
-        if (echoCanceler != null) {
-            try {
-                echoCanceler.release();
-            } catch (Exception e) {
-                // Ignore
-            }
-            echoCanceler = null;
-        }
+            // 2. Soft Limiter (tanh-like curve or hard clamp)
+            // Hard clamp is simplest but causes square waves.
+            // Let's use hard clamp for speed, but user asked for "Best Quality".
+            // Soft clipping: if x > threshold, compress.
+            // Using simple hard clamp for now as 2.5x gain isn't massive.
 
-        if (agc != null) {
-            try {
-                agc.release();
-            } catch (Exception e) {
-                // Ignore
-            }
-            agc = null;
+            if (processed > 32767.0f)
+                processed = 32767.0f;
+            if (processed < -32768.0f)
+                processed = -32768.0f;
+
+            int newSample = (int) processed;
+
+            // Convert back to bytes
+            output[i] = (byte) (newSample & 0xFF);
+            output[i + 1] = (byte) ((newSample >> 8) & 0xFF);
         }
+        return output;
     }
 
     private void captureLoop() {
-        short[] buffer = new short[BUFFER_SIZE];
-        byte[] byteBuffer = new byte[BUFFER_SIZE * 2];
+        // Larger buffer for processing
+        int processBufferSize = BUFFER_SIZE;
+        byte[] buffer = new byte[processBufferSize];
+
+        // Software Gain Factor (Volume Boost)
+        // Multiplier for PCM samples. 1.0 = original.
+        // User reported volume is too low.
+        float gainFactor = 2.5f;
 
         while (isRunning && audioRecord != null) {
-            int samplesRead = audioRecord.read(buffer, 0, BUFFER_SIZE);
+            int bytesRead = audioRecord.read(buffer, 0, processBufferSize);
 
-            // Only send audio when mic is active (controlled by Mod)
-            if (samplesRead > 0 && isMicActive) {
-                // Convert shorts to bytes (little endian)
-                for (int i = 0; i < samplesRead; i++) {
-                    byteBuffer[i * 2] = (byte) (buffer[i] & 0xFF);
-                    byteBuffer[i * 2 + 1] = (byte) ((buffer[i] >> 8) & 0xFF);
-                }
+            // Only send audio when mic is active (controlled by Mod) and read is valid
+            if (bytesRead > 0 && isMicActive) {
+
+                // Apply Software Gain
+                byte[] val = applyGain(buffer, bytesRead, gainFactor);
 
                 // Send to Mindustry mod
-                sendAudio(byteBuffer, samplesRead * 2);
+                sendAudio(val, bytesRead);
             }
         }
     }

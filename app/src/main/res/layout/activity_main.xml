@@ -33,37 +33,17 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="32dp"
-        android:text="Status: Stopped"
-        android:textSize="16sp" />
-
-    <LinearLayout
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="24dp"
-        android:orientation="horizontal">
-
-        <Button
-            android:id="@+id/startButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Start" />
-
-        <Button
-            android:id="@+id/stopButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="16dp"
-            android:text="Stop"
-            android:enabled="false" />
-
-    </LinearLayout>
+        android:text="Status: Waiting for Mod..."
+        android:textSize="18sp"
+        android:textColor="#FFFFFF" />
 
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="48dp"
-        android:text="Open Mindustry and enable Voice Chat"
-        android:textSize="12sp"
-        android:textColor="#666666" />
+        android:text="App runs in background automatically."
+        android:textSize="14sp"
+        android:alpha="0.7"
+        android:textColor="#CCCCCC" />
 
 </LinearLayout>

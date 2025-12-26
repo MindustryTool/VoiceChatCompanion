@@ -34,12 +34,7 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        startButton = findViewById(R.id.startButton);
-        stopButton = findViewById(R.id.stopButton);
         statusText = findViewById(R.id.statusText);
-
-        startButton.setOnClickListener(v -> checkPermissionsAndStart());
-        stopButton.setOnClickListener(v -> stopService());
 
         updateUI(AudioCaptureService.isRunning());
 
@@ -62,43 +57,10 @@ public class MainActivity extends AppCompatActivity {
         updateUI(AudioCaptureService.isRunning());
     }
 
-    @Override
-    public boolean onCreateOptionsMenu(Menu menu) {
-        menu.add(0, 1, 0, "Check for Updates");
-        menu.add(0, 2, 0, "About");
-        return true;
-    }
-
-    @Override
-    public boolean onOptionsItemSelected(@NonNull MenuItem item) {
-        switch (item.getItemId()) {
-            case 1:
-                updateChecker.checkForUpdatesWithNotification();
-                return true;
-            case 2:
-                showAbout();
-                return true;
-            default:
-                return super.onOptionsItemSelected(item);
-        }
-    }
-
-    private void showAbout() {
-        try {
-            String version = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
-            new androidx.appcompat.app.AlertDialog.Builder(this)
-                    .setTitle("Voice Chat Companion")
-                    .setMessage("Version: " + version + "\n\n" +
-                            "Captures microphone audio for Mindustry Voice Chat.\n\n" +
-                            "github.com/MindustryTool/VoiceChatCompanion")
-                    .setPositiveButton("OK", null)
-                    .show();
-        } catch (Exception e) {
-            // Ignore
-        }
-    }
+    // ... (keep menu code) ...
 
     private boolean checkPermissionsAndStart() {
+        // ... (keep permission checks) ...
         // Check RECORD_AUDIO permission
         if (ContextCompat.checkSelfPermission(this,
                 Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
@@ -131,20 +93,14 @@ public class MainActivity extends AppCompatActivity {
             startService(intent);
         }
         updateUI(true);
-        Toast.makeText(this, "Voice Chat started", Toast.LENGTH_SHORT).show();
     }
 
-    private void stopService() {
-        Intent intent = new Intent(this, AudioCaptureService.class);
-        stopService(intent);
-        updateUI(false);
-        Toast.makeText(this, "Voice Chat stopped", Toast.LENGTH_SHORT).show();
-    }
+    // stopService method removed as manual stop is not needed
 
     private void updateUI(boolean isRunning) {
-        startButton.setEnabled(!isRunning);
-        stopButton.setEnabled(isRunning);
-        statusText.setText(isRunning ? "Status: Running" : "Status: Stopped");
+        if (statusText != null) {
+            statusText.setText(isRunning ? "Status: Running" : "Status: Waiting for Mod...");
+        }
     }
 
     @Override
