@@ -114,24 +114,42 @@ public class AudioCaptureService extends Service {
         }
     }
 
-    private Notification createNotification() {
+    private void updateNotification(String status) {
+        NotificationManager manager = getSystemService(NotificationManager.class);
+        if (manager != null) {
+            manager.notify(NOTIFICATION_ID, createNotification(status));
+        }
+    }
+
+    private Notification createNotification(String status) {
         Intent intent = new Intent(this, MainActivity.class);
         PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, intent,
                 PendingIntent.FLAG_IMMUTABLE);
 
         return new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("Voice Chat Active")
-                .setContentText("Capturing audio for Mindustry")
+                .setContentText(status)
                 .setSmallIcon(R.drawable.ic_mic)
                 .setContentIntent(pendingIntent)
                 .setOngoing(true)
                 .build();
     }
 
+    // Overload for initial creation
+    private Notification createNotification() {
+        return createNotification("Initializing...");
+    }
+
     private void startCapture() {
         if (isRunning)
             return;
         isRunning = true;
+
+        // 1. Connect first (so we can report errors)
+        new Thread(() -> {
+            updateNotification("Connecting to Mod...");
+            connectToMindustry();
+        }).start();
 
         int minBufferSize = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT);
         // Use larger buffer for smoother audio
@@ -148,6 +166,7 @@ public class AudioCaptureService extends Service {
 
             if (audioRecord.getState() != AudioRecord.STATE_INITIALIZED) {
                 Log.e(TAG, "AudioRecord not initialized, falling back to MIC source");
+                updateNotification("Mic Init Failed (Retrying...)");
                 // Fallback to regular MIC source
                 audioRecord = new AudioRecord(
                         MediaRecorder.AudioSource.MIC,
@@ -158,6 +177,7 @@ public class AudioCaptureService extends Service {
 
                 if (audioRecord.getState() != AudioRecord.STATE_INITIALIZED) {
                     Log.e(TAG, "AudioRecord still not initialized");
+                    updateNotification("Error: Mic Init Failed");
                     stopSelf();
                     return;
                 }
@@ -169,16 +189,20 @@ public class AudioCaptureService extends Service {
 
             audioRecord.startRecording();
             Log.i(TAG, "Audio capture started with session ID: " + audioSessionId);
+            updateNotification("Mic Ready. Waiting for Mod...");
 
             captureThread = new Thread(this::captureLoop);
             captureThread.start();
 
-            // Critical Fix: Connect immediately to listen for commands (START_MIC)
-            // Otherwise we wait for sendAudio which never happens if mic is inactive!
-            new Thread(this::connectToMindustry).start();
-
         } catch (SecurityException e) {
             Log.e(TAG, "Permission denied: " + e.getMessage());
+            updateNotification("Error: Mic Permission Denied!");
+            // Keep service running briefly so user can see notification?
+            // no, stopSelf is better, but notification might vanish.
+            stopSelf();
+        } catch (Exception e) {
+            Log.e(TAG, "Mic Error: " + e.getMessage());
+            updateNotification("Error: " + e.getMessage());
             stopSelf();
         }
     }
@@ -359,6 +383,7 @@ public class AudioCaptureService extends Service {
             outputStream = socket.getOutputStream();
             inputStream = socket.getInputStream();
             Log.i(TAG, "Connected to Mindustry mod (TCP_NODELAY enabled, command channel ready)");
+            updateNotification("Connected! Mic Active.");
 
             // Start command listener if not already running
             if (commandThread == null || !commandThread.isAlive()) {
@@ -368,6 +393,7 @@ public class AudioCaptureService extends Service {
             }
         } catch (Exception e) {
             Log.w(TAG, "Cannot connect to Mindustry mod: " + e.getMessage());
+            updateNotification("Conn Failed: " + e.getMessage());
         }
     }
 
