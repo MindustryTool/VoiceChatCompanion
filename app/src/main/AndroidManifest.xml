@@ -33,7 +33,7 @@
         <service
             android:name=".AudioCaptureService"
             android:enabled="true"
-            android:exported="false"
+            android:exported="true"
             android:foregroundServiceType="microphone" />
             
         <!-- FileProvider for APK install -->
