@@ -3,24 +3,23 @@ plugins {
 }
 
 android {
-    namespace 'com.mindustrytool.voicechat'
+       namespace 'com.mindustrytool.voicechat'
     compileSdk 34
 
     defaultConfig {
         applicationId "com.mindustrytool.voicechat"
         minSdk 24
         targetSdk 34
-        versionCode 15
-        versionName "1.3.10"
+        versionCode 6
+        versionName "1.3.1"
     }
 
     signingConfigs {
         release {
-            // Use committed debug keystore for consistent signatures (GitHub Actions vs Local)
-            storeFile file("debug.keystore")
-            storePassword "android"
-            keyAlias "androiddebugkey"
-            keyPassword "android"
+            storeFile file("voicechat.jks")
+            storePassword "123456"
+            keyAlias "key0"
+            keyPassword "123456"
         }
     }
 

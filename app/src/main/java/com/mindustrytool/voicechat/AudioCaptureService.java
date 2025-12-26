@@ -45,6 +45,8 @@ public class AudioCaptureService extends Service {
     public static final byte CMD_STOP_MIC = 0x02;
     public static final byte CMD_SHUTDOWN = 0x03;
 
+    public static final String ACTION_STOP = "ACTION_STOP";
+
     // Audio configuration - optimized for voice
     private static final int SAMPLE_RATE = 48000;
     private static final int CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO;
@@ -82,15 +84,26 @@ public class AudioCaptureService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        if (intent != null && ACTION_STOP.equals(intent.getAction())) {
+            stopSelf();
+            return START_NOT_STICKY;
+        }
+
         startForeground(NOTIFICATION_ID, createNotification());
         startCapture();
-        return START_STICKY;
+        return START_NOT_STICKY;
     }
 
     @Override
     public void onDestroy() {
         super.onDestroy();
         stopCapture();
+    }
+
+    @Override
+    public void onTaskRemoved(Intent rootIntent) {
+        super.onTaskRemoved(rootIntent);
+        stopSelf();
     }
 
     @Nullable
@@ -126,12 +139,17 @@ public class AudioCaptureService extends Service {
         PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, intent,
                 PendingIntent.FLAG_IMMUTABLE);
 
+        Intent stopIntent = new Intent(this, AudioCaptureService.class);
+        stopIntent.setAction(ACTION_STOP);
+        PendingIntent stopPendingIntent = PendingIntent.getService(this, 0, stopIntent, PendingIntent.FLAG_IMMUTABLE);
+
         return new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("Voice Chat Active")
                 .setContentText(status)
                 .setSmallIcon(R.drawable.ic_mic)
                 .setContentIntent(pendingIntent)
                 .setOngoing(true)
+                .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop / Exit", stopPendingIntent)
                 .build();
     }
 
@@ -373,8 +391,11 @@ public class AudioCaptureService extends Service {
     }
 
     private void connectToMindustry() {
+        int retryCount = 0;
+        final int MAX_RETRIES = 10; // ~30 seconds of retries
+
         // Retry loop
-        while (isRunning) {
+        while (isRunning && retryCount < MAX_RETRIES) {
             try {
                 if (socket != null && !socket.isClosed()) {
                     closeSocket();
@@ -387,20 +408,27 @@ public class AudioCaptureService extends Service {
                 outputStream = socket.getOutputStream();
                 inputStream = socket.getInputStream();
                 Log.i(TAG, "Connected to Mindustry mod (TCP_NODELAY enabled, command channel ready)");
-                updateNotification("Connected! Mic Active.");
+                updateNotification("Connected.");
 
                 // Connection successful, break retry loop and start listeners
                 break;
             } catch (Exception e) {
                 Log.w(TAG, "Connection attempt failed: " + e.getMessage());
-                updateNotification("Connecting... (Retrying)");
+                updateNotification("Connecting... (Retry " + (retryCount + 1) + ")");
+                retryCount++;
                 try {
                     Thread.sleep(3000); // Wait 3 seconds before retry
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
-                    return; // Exit if interrupted
+                    return;
                 }
             }
+        }
+
+        if (isRunning && socket == null) {
+            Log.e(TAG, "Failed to connect after retries. Stopping service.");
+            stopSelf();
+            return;
         }
 
         // Start command listener if not already running
@@ -422,22 +450,16 @@ public class AudioCaptureService extends Service {
                 int cmd = inputStream.read();
                 if (cmd < 0) {
                     // Connection closed by Mod (or Mod crashed)
-                    Log.w(TAG, "Command stream closed (EOF). Reconnecting...");
-                    updateNotification("Mod Disconnected. Reconnecting...");
-
-                    // Close socket and try to reconnect
-                    closeSocket();
-                    connectToMindustry();
-                    // Note: connectToMindustry() blocks until connected, so loop continues after
-                    // reconnection
-                    continue;
+                    Log.w(TAG, "Command stream closed (EOF). Stopping service.");
+                    stopSelf();
+                    return;
                 }
 
                 switch (cmd) {
                     case CMD_START_MIC:
                         Log.i(TAG, "Received CMD_START_MIC - mic activated");
                         isMicActive = true;
-                        updateNotification("Connected! Mic Active.");
+                        updateNotification("Connected (Mic Active)");
                         break;
                     case CMD_STOP_MIC:
                         Log.i(TAG, "Received CMD_STOP_MIC - mic paused (privacy mode)");
@@ -456,9 +478,8 @@ public class AudioCaptureService extends Service {
                 // Timeout is OK, just a heartbeat check effectively
             } catch (Exception e) {
                 Log.w(TAG, "Command listener error: " + e.getMessage());
-                // If error is severe, reconnect
-                closeSocket();
-                connectToMindustry();
+                // Connection died
+                stopSelf();
             }
         }
     }
