@@ -323,11 +323,11 @@ public class AudioCaptureService extends Service {
 
                 int cmd = inputStream.read();
                 if (cmd < 0) {
-                    // Connection closed
-                    Log.w(TAG, "Command stream closed by Mod");
-                    closeSocket();
-                    Thread.sleep(1000); // Wait before retry
-                    continue;
+                    // Connection closed by Mod (or Mod crashed)
+                    Log.w(TAG, "Command stream closed (EOF). Stopping service.");
+                    updateNotification("Mod Disconnected. Stopping...");
+                    stopSelf(); // Kill service immediately
+                    return;
                 }
 
                 switch (cmd) {

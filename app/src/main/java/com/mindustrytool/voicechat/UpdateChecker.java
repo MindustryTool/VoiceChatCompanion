@@ -308,13 +308,19 @@ public class UpdateChecker {
                     Cursor cursor = downloadManager.query(query);
 
                     if (cursor != null && cursor.moveToFirst()) {
-                        int status = cursor.getInt(cursor.getColumnIndexOrThrow(
-                                DownloadManager.COLUMN_STATUS));
-                        if (status == DownloadManager.STATUS_SUCCESSFUL) {
-                            installApk(fileName);
-                        } else {
-                            mainHandler.post(() -> Toast.makeText(context,
-                                    "Download failed", Toast.LENGTH_SHORT).show());
+                        int statusIndex = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS);
+                        int uriIndex = cursor.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI);
+
+                        if (statusIndex != -1 && uriIndex != -1) {
+                            int status = cursor.getInt(statusIndex);
+                            String localUri = cursor.getString(uriIndex);
+
+                            if (status == DownloadManager.STATUS_SUCCESSFUL && localUri != null) {
+                                installApk(Uri.parse(localUri));
+                            } else {
+                                mainHandler.post(() -> Toast.makeText(context,
+                                        "Download failed", Toast.LENGTH_SHORT).show());
+                            }
                         }
                         cursor.close();
                     }
@@ -330,9 +336,13 @@ public class UpdateChecker {
         }
     }
 
-    private void installApk(String fileName) {
-        File apkFile = new File(Environment.getExternalStoragePublicDirectory(
-                Environment.DIRECTORY_DOWNLOADS), fileName);
+    private void installApk(Uri localFileUri) {
+        if (localFileUri == null) {
+            Toast.makeText(context, "Install failed: No file URI", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        File apkFile = new File(localFileUri.getPath());
 
         if (!apkFile.exists()) {
             Toast.makeText(context, "Download failed - file not found", Toast.LENGTH_SHORT).show();
@@ -343,17 +353,17 @@ public class UpdateChecker {
 
         try {
             Intent intent = new Intent(Intent.ACTION_VIEW);
-            Uri apkUri;
+            Uri apkContentUri;
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                apkUri = FileProvider.getUriForFile(context,
+                apkContentUri = FileProvider.getUriForFile(context,
                         context.getPackageName() + ".fileprovider", apkFile);
                 intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
             } else {
-                apkUri = Uri.fromFile(apkFile);
+                apkContentUri = Uri.fromFile(apkFile);
             }
 
-            intent.setDataAndType(apkUri, "application/vnd.android.package-archive");
+            intent.setDataAndType(apkContentUri, "application/vnd.android.package-archive");
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
 

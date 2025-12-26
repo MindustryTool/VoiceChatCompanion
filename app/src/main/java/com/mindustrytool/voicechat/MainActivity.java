@@ -46,6 +46,14 @@ public class MainActivity extends AppCompatActivity {
         // Check for updates on app start
         updateChecker = new UpdateChecker(this);
         updateChecker.checkForUpdates();
+
+        // Handle Auto-Launch from Mod
+        if (getIntent().getBooleanExtra("EXTRA_AUTO_LAUNCH", false)) {
+            if (checkPermissionsAndStart()) {
+                // Only minimize if permission granted and service starting
+                moveTaskToBack(true);
+            }
+        }
     }
 
     @Override
@@ -90,14 +98,14 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void checkPermissionsAndStart() {
+    private boolean checkPermissionsAndStart() {
         // Check RECORD_AUDIO permission
         if (ContextCompat.checkSelfPermission(this,
                 Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(this,
                     new String[] { Manifest.permission.RECORD_AUDIO },
                     PERMISSION_REQUEST_CODE);
-            return;
+            return false;
         }
 
         // Check notification permission for Android 13+
@@ -107,11 +115,12 @@ public class MainActivity extends AppCompatActivity {
                 ActivityCompat.requestPermissions(this,
                         new String[] { Manifest.permission.POST_NOTIFICATIONS },
                         PERMISSION_REQUEST_CODE);
-                return;
+                return false;
             }
         }
 
         startService();
+        return true;
     }
 
     private void startService() {
