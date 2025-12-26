@@ -37,7 +37,7 @@ import java.util.concurrent.Executors;
 public class UpdateChecker {
 
     private static final String TAG = "UpdateChecker";
-    private static final String GITHUB_API_URL = "https://api.github.com/repos/MindustryTool/VoiceChatCompanion/releases/latest";
+    private static final String GITHUB_API_URL = "https://api.github.com/repos/MindustryTool/VoiceChatCompanion/releases?per_page=1";
 
     private final Context context;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -119,6 +119,7 @@ public class UpdateChecker {
         conn.setRequestProperty("User-Agent", "VoiceChatCompanion-Android");
         conn.setConnectTimeout(15000);
         conn.setReadTimeout(15000);
+        conn.setUseCaches(false);
 
         int responseCode = conn.getResponseCode();
         if (responseCode != 200) {
@@ -134,7 +135,11 @@ public class UpdateChecker {
         reader.close();
         conn.disconnect();
 
-        JSONObject json = new JSONObject(response.toString());
+        JSONArray releases = new JSONArray(response.toString());
+        if (releases.length() == 0) {
+            return null;
+        }
+        JSONObject json = releases.getJSONObject(0);
 
         // Get version from tag_name, strip 'v' prefix if present
         String tagName = json.getString("tag_name");
