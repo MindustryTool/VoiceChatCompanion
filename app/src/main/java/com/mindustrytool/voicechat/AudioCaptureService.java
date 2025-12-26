@@ -173,6 +173,10 @@ public class AudioCaptureService extends Service {
             captureThread = new Thread(this::captureLoop);
             captureThread.start();
 
+            // Critical Fix: Connect immediately to listen for commands (START_MIC)
+            // Otherwise we wait for sendAudio which never happens if mic is inactive!
+            new Thread(this::connectToMindustry).start();
+
         } catch (SecurityException e) {
             Log.e(TAG, "Permission denied: " + e.getMessage());
             stopSelf();
