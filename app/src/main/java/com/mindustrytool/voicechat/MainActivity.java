@@ -52,9 +52,30 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleAutoLaunch();
+    }
+
+    @Override
     protected void onResume() {
         super.onResume();
         updateUI(AudioCaptureService.isRunning());
+    }
+
+    private void handleAutoLaunch() {
+        // Handle Auto-Launch from Mod
+        if (getIntent().getBooleanExtra("EXTRA_AUTO_LAUNCH", false)) {
+            // If service is running, just go back to background
+            if (AudioCaptureService.isRunning()) {
+                moveTaskToBack(true);
+            } else {
+                if (checkPermissionsAndStart()) {
+                    moveTaskToBack(true);
+                }
+            }
+        }
     }
 
     // ... (keep menu code) ...

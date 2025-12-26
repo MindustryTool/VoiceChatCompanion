@@ -351,47 +351,6 @@ public class AudioCaptureService extends Service {
     /**
      * Listen for control commands from Mod (START_MIC, STOP_MIC, SHUTDOWN).
      */
-    private void commandListenerLoop() {
-        while (isRunning) {
-            try {
-                if (inputStream == null) {
-                    Thread.sleep(100);
-                    continue;
-                }
-
-                int cmd = inputStream.read();
-                if (cmd < 0) {
-                    // Connection closed by Mod (or Mod crashed)
-                    Log.w(TAG, "Command stream closed (EOF). Stopping service.");
-                    updateNotification("Mod Disconnected. Stopping...");
-                    stopSelf(); // Kill service immediately
-                    return;
-                }
-
-                switch (cmd) {
-                    case CMD_START_MIC:
-                        Log.i(TAG, "Received CMD_START_MIC - mic activated");
-                        isMicActive = true;
-                        break;
-                    case CMD_STOP_MIC:
-                        Log.i(TAG, "Received CMD_STOP_MIC - mic paused (privacy mode)");
-                        isMicActive = false;
-                        break;
-                    case CMD_SHUTDOWN:
-                        Log.i(TAG, "Received CMD_SHUTDOWN - stopping service");
-                        isMicActive = false;
-                        stopSelf();
-                        return;
-                    default:
-                        Log.w(TAG, "Unknown command: " + cmd);
-                }
-            } catch (java.net.SocketTimeoutException e) {
-                // Timeout is OK
-            } catch (Exception e) {
-                Log.w(TAG, "Command listener error: " + e.getMessage());
-            }
-        }
-    }
 
     private void sendAudio(byte[] data, int length) {
         try {
@@ -414,24 +373,93 @@ public class AudioCaptureService extends Service {
     }
 
     private void connectToMindustry() {
-        try {
-            socket = new Socket(HOST, PORT);
-            socket.setTcpNoDelay(true); // Disable Nagle's algorithm for lower latency
-            socket.setSoTimeout(5000); // 5 second timeout
-            outputStream = socket.getOutputStream();
-            inputStream = socket.getInputStream();
-            Log.i(TAG, "Connected to Mindustry mod (TCP_NODELAY enabled, command channel ready)");
-            updateNotification("Connected! Mic Active.");
+        // Retry loop
+        while (isRunning) {
+            try {
+                if (socket != null && !socket.isClosed()) {
+                    closeSocket();
+                }
 
-            // Start command listener if not already running
-            if (commandThread == null || !commandThread.isAlive()) {
-                commandThread = new Thread(this::commandListenerLoop);
-                commandThread.setDaemon(true);
-                commandThread.start();
+                Log.i(TAG, "Attempting connection to " + HOST + ":" + PORT);
+                socket = new Socket(HOST, PORT);
+                socket.setTcpNoDelay(true); // Disable Nagle's algorithm for lower latency
+                socket.setSoTimeout(5000); // 5 second timeout for read
+                outputStream = socket.getOutputStream();
+                inputStream = socket.getInputStream();
+                Log.i(TAG, "Connected to Mindustry mod (TCP_NODELAY enabled, command channel ready)");
+                updateNotification("Connected! Mic Active.");
+
+                // Connection successful, break retry loop and start listeners
+                break;
+            } catch (Exception e) {
+                Log.w(TAG, "Connection attempt failed: " + e.getMessage());
+                updateNotification("Connecting... (Retrying)");
+                try {
+                    Thread.sleep(3000); // Wait 3 seconds before retry
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    return; // Exit if interrupted
+                }
             }
-        } catch (Exception e) {
-            Log.w(TAG, "Cannot connect to Mindustry mod: " + e.getMessage());
-            updateNotification("Conn Failed: " + e.getMessage());
+        }
+
+        // Start command listener if not already running
+        if (isRunning && (commandThread == null || !commandThread.isAlive())) {
+            commandThread = new Thread(this::commandListenerLoop);
+            commandThread.setDaemon(true);
+            commandThread.start();
+        }
+    }
+
+    private void commandListenerLoop() {
+        while (isRunning) {
+            try {
+                if (inputStream == null) {
+                    Thread.sleep(100);
+                    continue;
+                }
+
+                int cmd = inputStream.read();
+                if (cmd < 0) {
+                    // Connection closed by Mod (or Mod crashed)
+                    Log.w(TAG, "Command stream closed (EOF). Reconnecting...");
+                    updateNotification("Mod Disconnected. Reconnecting...");
+
+                    // Close socket and try to reconnect
+                    closeSocket();
+                    connectToMindustry();
+                    // Note: connectToMindustry() blocks until connected, so loop continues after
+                    // reconnection
+                    continue;
+                }
+
+                switch (cmd) {
+                    case CMD_START_MIC:
+                        Log.i(TAG, "Received CMD_START_MIC - mic activated");
+                        isMicActive = true;
+                        updateNotification("Connected! Mic Active.");
+                        break;
+                    case CMD_STOP_MIC:
+                        Log.i(TAG, "Received CMD_STOP_MIC - mic paused (privacy mode)");
+                        isMicActive = false;
+                        updateNotification("Connected (Mic Paused)");
+                        break;
+                    case CMD_SHUTDOWN:
+                        Log.i(TAG, "Received CMD_SHUTDOWN - stopping service");
+                        isMicActive = false;
+                        stopSelf();
+                        return;
+                    default:
+                        Log.w(TAG, "Unknown command: " + cmd);
+                }
+            } catch (java.net.SocketTimeoutException e) {
+                // Timeout is OK, just a heartbeat check effectively
+            } catch (Exception e) {
+                Log.w(TAG, "Command listener error: " + e.getMessage());
+                // If error is severe, reconnect
+                closeSocket();
+                connectToMindustry();
+            }
         }
     }
 
