@@ -12,6 +12,8 @@ import android.media.MediaRecorder;
 import android.media.audiofx.AcousticEchoCanceler;
 import android.media.audiofx.AutomaticGainControl;
 import android.media.audiofx.NoiseSuppressor;
+import android.media.AudioManager;
+import android.content.Context;
 import android.os.Build;
 import android.os.IBinder;
 import android.util.Log;
@@ -97,11 +99,25 @@ public class AudioCaptureService extends Service {
         }
 
         startCapture();
+
+        // Optimize Audio Mode for VoIP (Critical for AEC)
+        AudioManager audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        if (audioManager != null) {
+            audioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
+            audioManager.setSpeakerphoneOn(true); // Ensure speaker is used, not earpiece
+        }
+
         return START_NOT_STICKY;
     }
 
     @Override
     public void onDestroy() {
+        // Reset Audio Mode
+        AudioManager audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        if (audioManager != null) {
+            audioManager.setMode(AudioManager.MODE_NORMAL);
+        }
+
         super.onDestroy();
         stopCapture();
     }
